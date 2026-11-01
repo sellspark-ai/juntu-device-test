@@ -8,7 +8,8 @@ SHA256SUMS.txt are in the same folder; the page does not link to them.
 
 Videos, photos and music you pick stay on this device, in the browser's storage for this site (IndexedDB). Nothing is
 uploaded and file names are not stored. A photo the browser cannot read directly (for example some HEIC files) is
-kept as a JPEG copy. If a file cannot be added, the message shows why, with a "Copy details" button: tapping it
+kept as a JPEG copy. Where the browser does not store files in IndexedDB as they are (Safari Private Browsing),
+the app stores their bytes in pieces instead and shows one line that nothing is kept after the tab closes. If a file cannot be added, the message shows why, with a "Copy details" button: tapping it
 copies one line to the clipboard (kind, type, size, codec, the step that failed and the error; no file names), and
 nothing is copied or sent otherwise. A small export-settings cache in the site's localStorage
 (juntu-route-cache-v1) remembers which video encoder works on this device; it holds the browser's user agent and
