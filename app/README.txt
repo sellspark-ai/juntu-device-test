@@ -1,6 +1,6 @@
 Juntu (slice 2: one Short end to end, with subtitles)
 
-index.html is the Juntu app as one page: its code, styles, fonts (also the subtitle font, which the export burns
+index.html is the Juntu app as one page: its code, styles, fonts (also the 12 subtitle fonts, which the export burns
 into the video) and the export engine are inside the file. The only
 other files the page loads are its Home Screen icons and web manifest, which sit next to it:
 apple-touch-icon.png, favicon.svg, icon-192.png, icon-512.png, icon-maskable-512.png, manifest.webmanifest.
@@ -17,4 +17,5 @@ video does the same for playback counters (frames shown, counted two ways, and d
 (juntu-route-cache-v1) remembers which video encoder works on this device; it holds the browser's user agent and
 the measured encoder speeds, and also never leaves the device. Subtitle styles you save with "Save this style" are
 kept in the site's localStorage (juntu-saved-styles-v1) so they can be used in other Shorts; subtitle text is
-stored only inside the Short's own history in IndexedDB and never leaves the device. Exports are saved through the Share sheet ("Save Video" puts them in Photos).
+stored only inside the Short's own history in IndexedDB and never leaves the device. The height you drag the
+timeline to is remembered per orientation in localStorage (juntu-layout-v1, two numbers, nothing personal). Exports are saved through the Share sheet ("Save Video" puts them in Photos).
