@@ -18,4 +18,8 @@ video does the same for playback counters (frames shown, counted two ways, and d
 the measured encoder speeds, and also never leaves the device. Subtitle styles you save with "Save this style" are
 kept in the site's localStorage (juntu-saved-styles-v1) so they can be used in other Shorts; subtitle text is
 stored only inside the Short's own history in IndexedDB and never leaves the device. The height you drag the
-timeline to is remembered per orientation in localStorage (juntu-layout-v1, two numbers, nothing personal). Exports are saved through the Share sheet ("Save Video" puts them in Photos).
+timeline to is remembered per orientation in localStorage (juntu-layout-v1, two numbers, nothing personal).
+Voice recordings use the microphone only while you record; they are stored on this device like your videos and
+never leave it. The measured microphone delay, the "Hear your Short" choice and whether the microphone
+explanation was shown are kept in localStorage (juntu-voice-latency-v1, juntu-voice-prefs-v1,
+juntu-voice-asked-v1). Exports are saved through the Share sheet ("Save Video" puts them in Photos).
