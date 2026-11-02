@@ -1,6 +1,6 @@
 Juntu (slice 2: one Short end to end, with subtitles)
 
-index.html is the Juntu app as one page: its code, styles, fonts (also the 12 subtitle fonts, which the export burns
+index.html is the Juntu app as one page: its code, styles, fonts (also the 16 subtitle fonts, which the export burns
 into the video) and the export engine are inside the file. The only
 other files the page loads are its Home Screen icons and web manifest, which sit next to it:
 apple-touch-icon.png, favicon.svg, icon-192.png, icon-512.png, icon-maskable-512.png, manifest.webmanifest.
