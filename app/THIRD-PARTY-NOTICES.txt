@@ -40,7 +40,8 @@ Juntu's own logo, icons and illustrations are original work (lane JA, brand-1).
 8. Fredoka font, weight 600, latin subset (via @fontsource/fredoka 5.3.0; the woff2 and woff files are embedded)
    Licence: SIL Open Font License 1.1. The text is reproduced below.
 
-9. Nunito font, weights 400 and 700, latin subset (via @fontsource/nunito 5.3.0; the woff2 and woff files are embedded)
+9. Nunito font, weights 400 and 700, latin subset, and weight 800, latin and latin-ext subsets (the subtitle font)
+   (via @fontsource/nunito 5.3.0; the woff2 and woff files are embedded)
    Licence: SIL Open Font License 1.1. The text is reproduced below.
 
 ---------------------------------------------------------------------
