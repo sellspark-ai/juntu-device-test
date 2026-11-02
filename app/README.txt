@@ -13,7 +13,7 @@ kept as a JPEG copy. Where the browser does not store files in IndexedDB as they
 the app stores their bytes in pieces instead and shows one line that nothing is kept after the tab closes. If a file cannot be added, the message shows why, with a "Copy details" button: tapping it
 copies one line to the clipboard (kind, type, size, codec, the step that failed and the error; no file names), and
 nothing is copied or sent otherwise. After a preview play of 2 s or more, a small "Preview check" label on the
-video does the same for playback counters (frames shown and dropped, seeks, waits; no file names). A small export-settings cache in the site's localStorage
+video does the same for playback counters (frames shown, counted two ways, and dropped; seeks, waits; no file names). A small export-settings cache in the site's localStorage
 (juntu-route-cache-v1) remembers which video encoder works on this device; it holds the browser's user agent and
 the measured encoder speeds, and also never leaves the device. Subtitle styles you save with "Save this style" are
 kept in the site's localStorage (juntu-saved-styles-v1) so they can be used in other Shorts; subtitle text is

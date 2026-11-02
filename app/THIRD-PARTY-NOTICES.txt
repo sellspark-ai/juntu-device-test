@@ -41,7 +41,8 @@ Juntu's own logo, icons and illustrations are original work (lane JA, brand-1).
    Licence: SIL Open Font License 1.1. The text is reproduced below.
 
 9. Nunito font, weights 400 and 700, latin subset, and weight 800, latin and latin-ext subsets (the subtitle font)
-   (via @fontsource/nunito 5.3.0; the woff2 and woff files are embedded)
+   (via @fontsource/nunito 5.3.0; for 400 and 700 the woff2 and woff files are embedded, for 800 the woff2
+   files only)
    Licence: SIL Open Font License 1.1. The text is reproduced below.
 
 ---------------------------------------------------------------------
