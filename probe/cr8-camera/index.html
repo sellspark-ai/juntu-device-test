@@ -23,7 +23,8 @@
   .row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
   button { appearance: none; -webkit-appearance: none; border: 0; border-radius: 999px; padding: 10px 16px; font-size: 15px; font-weight: 700; line-height: 1;
     font-family: inherit; color: var(--night); background: var(--mango); -webkit-tap-highlight-color: transparent; }
-  button.alt { background: #A98BFF; }
+  button.alt, a.btn { background: #A98BFF; }
+  a.btn { display: inline-block; border-radius: 999px; padding: 10px 16px; font-size: 15px; font-weight: 700; line-height: 1; color: var(--night); text-decoration: none; -webkit-tap-highlight-color: transparent; }
   button:active { transform: scale(0.97); }
   button:disabled { opacity: 0.5; }
   video { width: 100%; max-height: 40vh; background: #000; border-radius: 12px; display: block; }
@@ -41,6 +42,11 @@
     <button class="alt" data-testid="copy" id="copy" data-t="copy">Copy log</button>
   </div>
   <div class="row" id="one"></div>
+  <div class="row">
+    <button class="alt" data-testid="run-sys" id="sys" data-t="sys">G system camera</button>
+    <input type="file" accept="video/*" capture="environment" hidden data-testid="sys-input" id="sysin" />
+    <a class="btn" href="../../app/" target="_blank" rel="noopener" data-testid="open-out" data-t="out">H Juntu outside this app</a>
+  </div>
   <video id="v" playsinline muted autoplay></video>
   <p class="note" id="note" role="status"></p>
   <pre data-testid="log" id="log"></pre>
@@ -48,9 +54,9 @@
 <script>
 (() => {
   const L = {
-    en: { title: 'Juntu camera probe', how: '1. Open this page in Safari and tap "Run all". Tap "Copy log" and send it. 2. Add it to the Home Screen, open it from there, "Run all", "Copy log", send it.', all: 'Run all', copy: 'Copy log', copied: 'Copied.', running: 'Running, keep the iPad still.' },
-    de: { title: 'Juntu Kamera-Test', how: '1. Diese Seite in Safari öffnen und "Alle starten" tippen. "Log kopieren" tippen und schicken. 2. Zum Home-Bildschirm hinzufügen, von dort öffnen, "Alle starten", "Log kopieren", schicken.', all: 'Alle starten', copy: 'Log kopieren', copied: 'Kopiert.', running: 'Läuft, das iPad bitte ruhig halten.' },
-    pt: { title: 'Teste da câmera do Juntu', how: '1. Abra esta página no Safari e toque em "Rodar todos". Toque em "Copiar log" e envie. 2. Adicione à Tela de Início, abra por lá, "Rodar todos", "Copiar log", envie.', all: 'Rodar todos', copy: 'Copiar log', copied: 'Copiado.', running: 'Rodando, mantenha o iPad parado.' },
+    en: { title: 'Juntu camera probe', how: '1. Open this page in Safari and tap "Run all". Tap "Copy log" and send it. 2. Add it to the Home Screen, open it from there, "Run all", "Copy log", send it.', all: 'Run all', copy: 'Copy log', copied: 'Copied.', running: 'Running, keep the iPad still.', sys: 'G system camera (record 5 s, then Use Video)', out: 'H Juntu outside this app' },
+    de: { title: 'Juntu Kamera-Test', how: '1. Diese Seite in Safari öffnen und "Alle starten" tippen. "Log kopieren" tippen und schicken. 2. Zum Home-Bildschirm hinzufügen, von dort öffnen, "Alle starten", "Log kopieren", schicken.', all: 'Alle starten', copy: 'Log kopieren', copied: 'Kopiert.', running: 'Läuft, das iPad bitte ruhig halten.', sys: 'G System-Kamera (5 s aufnehmen, dann Video verwenden)', out: 'H Juntu außerhalb dieser App' },
+    pt: { title: 'Teste da câmera do Juntu', how: '1. Abra esta página no Safari e toque em "Rodar todos". Toque em "Copiar log" e envie. 2. Adicione à Tela de Início, abra por lá, "Rodar todos", "Copiar log", envie.', all: 'Rodar todos', copy: 'Copiar log', copied: 'Copiado.', running: 'Rodando, mantenha o iPad parado.', sys: 'G câmera do sistema (grave 5 s, depois Usar vídeo)', out: 'H Juntu fora deste app' },
   };
   const lang = (navigator.language || 'en').toLowerCase();
   const tx = lang.startsWith('de') ? L.de : lang.startsWith('pt') ? L.pt : L.en;
@@ -203,6 +209,52 @@
     log('');
     log('done');
   }, 'all'));
+  // G: the system camera through <input type=file accept=video/* capture=environment> (no getUserMedia). Logs what
+  // comes back: type, size, the picture's size and length; never the file's name.
+  const sysBtn = document.getElementById('sys');
+  const sysIn = document.getElementById('sysin');
+  let sysT0 = 0;
+  sysBtn.addEventListener('click', () => {
+    log('');
+    log('# G system camera (file input, accept video/*, capture environment)');
+    sysT0 = performance.now();
+    sysIn.value = '';
+    sysIn.click();
+  });
+  sysIn.addEventListener('cancel', () => {
+    log(`system camera cancelled after ${Math.round(performance.now() - sysT0)} ms`);
+    log('= G: no file (cancelled)');
+    document.body.dataset.done = 'G';
+  });
+  sysIn.addEventListener('change', async () => {
+    const f = sysIn.files && sysIn.files[0];
+    if (!sysT0) { log(''); log('# G system camera (file input, accept video/*, capture environment)'); sysT0 = performance.now(); }
+    if (!f) {
+      log('= G: no file');
+      document.body.dataset.done = 'G';
+      return;
+    }
+    log(`system camera file: ${f.type || 'no type'}, ${f.size} B (${(f.size / 1048576).toFixed(1)} MB), ${Math.round(performance.now() - sysT0)} ms after the tap`);
+    const url = URL.createObjectURL(f);
+    const el = document.createElement('video');
+    el.muted = true;
+    el.playsInline = true;
+    el.preload = 'metadata';
+    const meta = await new Promise((res) => {
+      const done = (ok) => res(ok ? { w: el.videoWidth, h: el.videoHeight, d: el.duration } : null);
+      el.addEventListener('loadedmetadata', () => done(true), { once: true });
+      el.addEventListener('error', () => done(false), { once: true });
+      setTimeout(() => done(false), 10000);
+      el.src = url;
+    });
+    URL.revokeObjectURL(url);
+    if (meta && isFinite(meta.d)) {
+      log(`= G: system camera video ${meta.w}x${meta.h}, ${meta.d.toFixed(1)} s, ${(f.size / 1048576 / Math.max(meta.d, 0.1) * 60).toFixed(1)} MB per minute`);
+    } else log(`= G: system camera file ${f.type || 'no type'}, ${f.size} B, metadata NOT readable`);
+    sysT0 = 0;
+    document.body.dataset.done = 'G';
+  });
+
   document.getElementById('copy').addEventListener('click', async () => {
     const text = lines.join('\n');
     try {
