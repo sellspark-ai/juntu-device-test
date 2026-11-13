@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="Juntu Camera Probe" />
+<link rel="manifest" href="./manifest.webmanifest" />
+<link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+<title>Juntu Camera Probe</title>
+<!-- Lane CR8: the smallest page that opens the back camera the way Juntu does and logs each step (getUserMedia's
+     answer, the tracks' readyState and events, the picture's size) for a few seconds per scenario, in a Safari tab and
+     as a Home Screen app. Nothing leaves the iPad: no network request, no storage, the log is copied by hand. -->
+<style>
+  :root { --violet: #6A2EE8; --night: #1A1240; --paper: #FFF9F0; --mango: #FFC229; --leaf: #5BE38A; --papaya: #FF9466; }
+  * { box-sizing: border-box; }
+  *:focus, *:focus-visible { outline: none; box-shadow: none; }
+  html, body { margin: 0; background: var(--night); color: var(--paper); font: 16px/1.4 'Nunito', system-ui, -apple-system, sans-serif; }
+  main { padding: max(16px, env(safe-area-inset-top)) 16px 24px; max-width: 900px; margin: 0 auto; }
+  h1 { font: 700 22px/1.2 'Fredoka', system-ui, sans-serif; margin: 0 0 8px; }
+  p { margin: 0 0 12px; opacity: 0.9; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+  button { appearance: none; -webkit-appearance: none; border: 0; border-radius: 999px; padding: 10px 16px; font-size: 15px; font-weight: 700; line-height: 1;
+    font-family: inherit; color: var(--night); background: var(--mango); -webkit-tap-highlight-color: transparent; }
+  button.alt { background: #A98BFF; }
+  button:active { transform: scale(0.97); }
+  button:disabled { opacity: 0.5; }
+  video { width: 100%; max-height: 40vh; background: #000; border-radius: 12px; display: block; }
+  pre { white-space: pre-wrap; word-break: break-word; font: 12px/1.35 ui-monospace, monospace; background: rgba(255,255,255,0.06);
+    border-radius: 12px; padding: 12px; min-height: 120px; }
+  .note { color: var(--leaf); min-height: 1.4em; }
+</style>
+</head>
+<body>
+<main>
+  <h1 data-t="title">Juntu camera probe</h1>
+  <p data-t="how">1. Open this page in Safari and tap "Run all". Tap "Copy log" and send it. 2. Add it to the Home Screen, open it from there, "Run all", "Copy log", send it.</p>
+  <div class="row">
+    <button data-testid="run-all" id="all" data-t="all">Run all</button>
+    <button class="alt" data-testid="copy" id="copy" data-t="copy">Copy log</button>
+  </div>
+  <div class="row" id="one"></div>
+  <video id="v" playsinline muted autoplay></video>
+  <p class="note" id="note" role="status"></p>
+  <pre data-testid="log" id="log"></pre>
+</main>
+<script>
+(() => {
+  const L = {
+    en: { title: 'Juntu camera probe', how: '1. Open this page in Safari and tap "Run all". Tap "Copy log" and send it. 2. Add it to the Home Screen, open it from there, "Run all", "Copy log", send it.', all: 'Run all', copy: 'Copy log', copied: 'Copied.', running: 'Running, keep the iPad still.' },
+    de: { title: 'Juntu Kamera-Test', how: '1. Diese Seite in Safari öffnen und "Alle starten" tippen. "Log kopieren" tippen und schicken. 2. Zum Home-Bildschirm hinzufügen, von dort öffnen, "Alle starten", "Log kopieren", schicken.', all: 'Alle starten', copy: 'Log kopieren', copied: 'Kopiert.', running: 'Läuft, das iPad bitte ruhig halten.' },
+    pt: { title: 'Teste da câmera do Juntu', how: '1. Abra esta página no Safari e toque em "Rodar todos". Toque em "Copiar log" e envie. 2. Adicione à Tela de Início, abra por lá, "Rodar todos", "Copiar log", envie.', all: 'Rodar todos', copy: 'Copiar log', copied: 'Copiado.', running: 'Rodando, mantenha o iPad parado.' },
+  };
+  const lang = (navigator.language || 'en').toLowerCase();
+  const tx = lang.startsWith('de') ? L.de : lang.startsWith('pt') ? L.pt : L.en;
+  document.documentElement.lang = lang.startsWith('de') ? 'de' : lang.startsWith('pt') ? 'pt-BR' : 'en';
+  document.querySelectorAll('[data-t]').forEach((el) => (el.textContent = tx[el.dataset.t]));
+
+  const secs = Number(new URLSearchParams(location.search).get('secs')) || 8;
+  const logEl = document.getElementById('log');
+  const note = document.getElementById('note');
+  const video = document.getElementById('v');
+  const lines = [];
+  const log = (s) => { lines.push(s); logEl.textContent = lines.join('\n'); };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // Juntu's own request (app/src/capture/format.ts videoConstraints('environment', true))
+  const APP = { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } }, audio: { echoCancellation: true } };
+  const SCENARIOS = [
+    { name: 'A app request (back camera 1920x1080 30 fps + mic)', c: APP },
+    { name: 'B app request + mic meter (AudioContext on the stream, as Juntu)', c: APP, meter: true },
+    { name: 'C back camera, video only, app sizes', c: { video: APP.video, audio: false } },
+    { name: 'D back camera, video only, no sizes', c: { video: { facingMode: 'environment' }, audio: false } },
+    { name: 'E video: true, audio: true', c: { video: true, audio: true } },
+    { name: 'F app request again (second open right after a stop, as a reopen)', c: APP, quick: true },
+  ];
+
+  const standalone = navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+  log(`probe cr8-camera, ${new Date().toISOString().slice(0, 16)}Z`);
+  log(`ua ${navigator.userAgent}`);
+  log(`display ${standalone ? 'Home Screen app' : 'browser tab'}, visibility ${document.visibilityState}, ${innerWidth}x${innerHeight}`);
+  log(`getUserMedia ${navigator.mediaDevices && navigator.mediaDevices.getUserMedia ? 'present' : 'MISSING'}`);
+  document.addEventListener('visibilitychange', () => log(`page visibility ${document.visibilityState}`));
+  addEventListener('pagehide', () => log('pagehide'));
+
+  const trackText = (t) => (t ? `${t.kind} ${t.readyState}${t.muted ? ' MUTED' : ''}${t.enabled ? '' : ' DISABLED'}` : 'none');
+  let busy = false;
+
+  // opens with the request c, shows it, watches it for `secs`; returns whether WebKit ended the video track
+  async function watchOpen(c, opts, tag) {
+    const t0 = performance.now();
+    const ms = () => Math.round(performance.now() - t0);
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(c);
+    } catch (e) {
+      log(`${opts.retry ? 'fresh getUserMedia after ended: ' : 'getUserMedia '}FAILED in ${ms()} ms: ${e && e.name} ${e && e.message}`);
+      log(`= ${tag}: no stream (${e && e.name})`);
+      return false;
+    }
+    log(`${opts.retry ? 'fresh getUserMedia after ended: answered' : 'getUserMedia answered'} in ${ms()} ms`);
+    const v = stream.getVideoTracks()[0];
+    const a = stream.getAudioTracks()[0];
+    window.__probeTrack = v;
+    let endedAt = null;
+    for (const t of [v, a]) {
+      if (!t) continue;
+      for (const k of ['mute', 'unmute', 'ended']) t.addEventListener(k, () => {
+        if (k === 'ended' && t === v && endedAt === null) endedAt = ms();
+        log(`${t.kind} track event ${k} at ${ms()} ms after open (${trackText(t)})`);
+      });
+    }
+    const st = v ? v.getSettings() : {};
+    log(`video settings ${st.width}x${st.height} ${st.frameRate} fps, facing ${st.facingMode || '?'}; ${trackText(v)}; ${trackText(a)}`);
+    let meter = null;
+    if (opts.meter && a) {
+      try {
+        const ctx = new AudioContext();
+        const src = ctx.createMediaStreamSource(stream);
+        const node = ctx.createAnalyser();
+        src.connect(node);
+        void ctx.resume();
+        meter = ctx;
+        log(`mic meter on, AudioContext ${ctx.state}`);
+      } catch (e) {
+        log(`mic meter FAILED ${e && e.name}`);
+      }
+    }
+    const vev = ['loadedmetadata', 'resize', 'playing', 'stalled', 'emptied'];
+    const onV = (e) => log(`preview ${e.type} at ${ms()} ms, ${video.videoWidth}x${video.videoHeight}`);
+    vev.forEach((k) => video.addEventListener(k, onV));
+    video.srcObject = stream;
+    video.play().then(() => log(`preview play() ok at ${ms()} ms`), (e) => log(`preview play() FAILED ${e && e.name}`));
+    let lastFrame = video.currentTime;
+    // every 250 ms the track's state is read, so the time to 'ended' is known even if no event comes
+    let seenEnded = null;
+    for (let k = 1; k <= secs * 4; k++) {
+      await sleep(250);
+      if (v && v.readyState === 'ended' && seenEnded === null) seenEnded = ms();
+      if (k % 4 === 0) {
+        const moving = video.currentTime !== lastFrame;
+        lastFrame = video.currentTime;
+        log(`${k / 4} s: ${trackText(v)}, ${trackText(a)}; preview ${video.paused ? 'paused' : 'playing'} ${video.videoWidth}x${video.videoHeight}, ready ${video.readyState}, time ${moving ? 'moving' : 'STILL'}`);
+      }
+      if ((endedAt !== null || seenEnded !== null) && k >= 4) break;
+    }
+    const size = `${video.videoWidth}x${video.videoHeight}`;
+    const ended = endedAt !== null || seenEnded !== null || !v;
+    const verdict = !ended
+      ? `video live after ${secs.toFixed(1)} s, ${size}${v.muted ? ', MUTED' : ''}`
+      : `video ENDED (${endedAt !== null ? `event at ${endedAt} ms` : v ? `no event, seen ended by ${seenEnded} ms` : 'no video track'}), preview ${size}`;
+    log(`= ${tag}: ${verdict}; audio ${a ? a.readyState : 'none'}`);
+    vev.forEach((k) => video.removeEventListener(k, onV));
+    stream.getTracks().forEach((t) => t.stop());
+    video.srcObject = null;
+    if (meter) void meter.close();
+    window.__probeTrack = null;
+    return ended;
+  }
+
+  async function run(i) {
+    const s = SCENARIOS[i];
+    const tag = s.name.split(' ')[0];
+    log('');
+    log(`# ${s.name}`);
+    const ended = await watchOpen(s.c, { meter: s.meter }, tag);
+    // does a fresh getUserMedia with the same request bring the picture back?
+    if (ended) await watchOpen(s.c, { meter: s.meter, retry: true }, `${tag} retry after ended`);
+  }
+
+  async function guard(fn, tag) {
+    if (busy) return;
+    busy = true;
+    document.body.dataset.done = '';
+    note.textContent = tx.running;
+    document.querySelectorAll('button').forEach((b) => b.id !== 'copy' && (b.disabled = true));
+    try {
+      await fn();
+    } catch (e) {
+      log(`probe error ${e && e.name} ${e && e.message}`);
+    }
+    document.querySelectorAll('button').forEach((b) => (b.disabled = false));
+    note.textContent = '';
+    busy = false;
+    document.body.dataset.done = tag;
+  }
+
+  const one = document.getElementById('one');
+  SCENARIOS.forEach((s, i) => {
+    const b = document.createElement('button');
+    b.className = 'alt';
+    b.dataset.testid = `run-${i}`;
+    b.textContent = s.name.split(' ')[0];
+    b.addEventListener('click', () => guard(() => run(i), String(i)));
+    one.appendChild(b);
+  });
+  document.getElementById('all').addEventListener('click', () => guard(async () => {
+    for (let i = 0; i < SCENARIOS.length; i++) {
+      await run(i);
+      if (!SCENARIOS[i + 1] || !SCENARIOS[i + 1].quick) await sleep(1000);
+    }
+    log('');
+    log('done');
+  }, 'all'));
+  document.getElementById('copy').addEventListener('click', async () => {
+    const text = lines.join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const r = document.createRange();
+      r.selectNodeContents(logEl);
+      const sel = getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+      document.execCommand('copy');
+    }
+    note.textContent = tx.copied;
+  });
+})();
+</script>
+</body>
+</html>
