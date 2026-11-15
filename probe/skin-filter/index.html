@@ -1,0 +1,679 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="Juntu Skin Filter" />
+<title>Juntu Skin Filter Probe</title>
+<!-- Lane SF1 (J-ED-17): a standalone probe for Juntu's skin filter. It plays a video from Files (or the front camera)
+     through skin-filter.js (WebGL2) with the controls Daniel asked for, and measures the frame rate, the dropped
+     frames and the time per filtered frame. Everything stays on the iPad: no network request, no storage; the
+     system data is copied by hand. -->
+<style>
+  :root { --violet: #6A2EE8; --night: #1A1240; --paper: #FFF9F0; --mango: #FFC229; --leaf: #5BE38A; --papaya: #FF9466;
+    --lilac: #A98BFF; --line: rgba(255, 249, 240, 0.16); --panel: rgba(255, 249, 240, 0.06); }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  *:focus, *:focus-visible { outline: none; box-shadow: none; }
+  html, body { margin: 0; background: var(--night); color: var(--paper); font: 16px/1.4 'Nunito', system-ui, -apple-system, sans-serif;
+    -webkit-tap-highlight-color: transparent; }
+  main { padding: max(16px, env(safe-area-inset-top)) 16px 24px; max-width: 1100px; margin: 0 auto; }
+  h1 { font: 700 22px/1.2 'Fredoka', system-ui, sans-serif; margin: 0 0 4px; }
+  p { margin: 0 0 12px; opacity: 0.9; }
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  @media (min-width: 760px) { .layout { grid-template-columns: minmax(0, 1fr) 340px; align-items: start; } }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+  button { appearance: none; -webkit-appearance: none; border: 0; border-radius: 999px; min-height: 44px; padding: 10px 18px;
+    font: 700 15px/1 inherit; font-family: inherit; color: var(--night); background: var(--mango); cursor: pointer;
+    -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  button.alt { background: var(--lilac); }
+  button:active { transform: scale(0.97); }
+  button:disabled { opacity: 0.45; }
+  .stage { position: relative; width: 100%; max-width: calc(min(72vh, 900px) * 9 / 16); aspect-ratio: 9 / 16; margin: 0 auto;
+    border-radius: 16px; overflow: hidden; background: #000; touch-action: none; user-select: none; -webkit-user-select: none; }
+  .stage video, .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .stage video { opacity: 0.01; }
+  .stage .hint { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); padding: 6px 12px; border-radius: 999px;
+    background: rgba(26, 18, 64, 0.72); font-size: 13px; font-weight: 700; white-space: nowrap; pointer-events: none; }
+  .stage .empty { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; color: var(--paper); opacity: 0.8; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 16px; }
+  .panel h2 { font: 700 16px/1.2 'Fredoka', system-ui, sans-serif; margin: 0 0 12px; }
+  /* segmented control */
+  .seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 4px; border-radius: 999px; background: rgba(255, 249, 240, 0.1); margin-bottom: 16px; }
+  .seg button { min-height: 40px; padding: 8px 6px; font-size: 14px; background: transparent; color: var(--paper); }
+  .seg button[aria-pressed='true'] { background: var(--mango); color: var(--night); }
+  /* branded sliders (J-SR-BRANDED-CONTROLS): the browser's own look is gone */
+  .ctl { margin: 0 0 14px; }
+  .ctl label { display: flex; justify-content: space-between; font-weight: 700; font-size: 15px; }
+  .ctl output { font-variant-numeric: tabular-nums; color: var(--mango); }
+  .ctl small { display: block; opacity: 0.7; font-size: 13px; margin-top: -2px; }
+  input[type='range'] { -webkit-appearance: none; appearance: none; width: 100%; height: 44px; margin: 0; padding: 0; background: transparent; cursor: pointer; touch-action: pan-y; }
+  input[type='range']::-webkit-slider-runnable-track { height: 8px; border-radius: 999px;
+    background: linear-gradient(to right, var(--mango) 0 var(--pct, 50%), rgba(255, 249, 240, 0.18) var(--pct, 50%) 100%); }
+  input[type='range']::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 28px; height: 28px; margin-top: -10px;
+    border-radius: 50%; background: var(--paper); border: 3px solid var(--violet); }
+  input[type='range']::-moz-range-track { height: 8px; border-radius: 999px; background: rgba(255, 249, 240, 0.18); }
+  input[type='range']::-moz-range-progress { height: 8px; border-radius: 999px; background: var(--mango); }
+  input[type='range']::-moz-range-thumb { width: 22px; height: 22px; border-radius: 50%; background: var(--paper); border: 3px solid var(--violet); }
+  .stats { font: 13px/1.45 ui-monospace, Menlo, monospace; white-space: pre-wrap; margin: 0 0 12px; color: var(--leaf); min-height: 4.4em; }
+  pre { white-space: pre-wrap; word-break: break-word; font: 12px/1.35 ui-monospace, Menlo, monospace; background: rgba(255, 249, 240, 0.06);
+    border-radius: 12px; padding: 12px; max-height: 40vh; overflow: auto; }
+  .note { color: var(--leaf); min-height: 1.4em; margin: 0; }
+  .err { color: var(--papaya); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Juntu skin filter</h1>
+  <p>Open a video with a face, tap Play, and set the sliders. Hold the picture to see the original. Nothing leaves this iPad.</p>
+  <div class="row">
+    <button data-testid="open" id="open">Open video</button>
+    <input type="file" accept="video/*" hidden data-testid="file" id="file" />
+    <button class="alt" data-testid="camera" id="camera">Use camera</button>
+    <button class="alt" data-testid="play" id="play" disabled>Play</button>
+  </div>
+  <div class="layout">
+    <div>
+      <div class="stage" id="stage" data-testid="stage">
+        <video id="v" playsinline muted loop preload="auto"></video>
+        <canvas id="c" width="1080" height="1920"></canvas>
+        <div class="empty" id="empty">Open a video or use the camera.</div>
+        <div class="hint" id="hint" hidden>Original</div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Skin filter</h2>
+      <div class="seg" role="group" aria-label="View" id="seg">
+        <button data-mode="1" aria-pressed="true" data-testid="mode-on">On</button>
+        <button data-mode="0" aria-pressed="false" data-testid="mode-off">Off</button>
+        <button data-mode="2" aria-pressed="false" data-testid="mode-split">Split</button>
+        <button data-mode="3" aria-pressed="false" data-testid="mode-mask">Skin</button>
+      </div>
+      <div class="ctl"><label for="smooth">Smoothing <output id="smoothOut"></output></label><small>Evens out the skin; edges stay sharp.</small>
+        <input type="range" id="smooth" min="0" max="100" step="1" data-testid="smooth" /></div>
+      <div class="ctl"><label for="blemish">Blemish reduction <output id="blemishOut"></output></label><small>Fades small red or dark spots.</small>
+        <input type="range" id="blemish" min="0" max="100" step="1" data-testid="blemish" /></div>
+      <div class="ctl"><label for="texture">Skin texture <output id="textureOut"></output></label><small>How much fine skin detail stays.</small>
+        <input type="range" id="texture" min="0" max="100" step="1" data-testid="texture" /></div>
+      <div class="row">
+        <button class="alt" id="reset" data-testid="reset">Reset</button>
+        <button id="copy" data-testid="copy">Copy system data</button>
+      </div>
+      <div class="stats" id="stats" data-testid="stats"></div>
+      <p class="note" id="note" role="status"></p>
+    </div>
+  </div>
+  <pre id="report" data-testid="report" hidden></pre>
+</main>
+<script type="module">
+// skin-filter.js, inlined by build.mjs
+// Lane SF1 (J-ED-17): Juntu's skin filter, one WebGL2 module for both the preview (an on-screen <canvas>) and, later,
+// the export (an OffscreenCanvas in the export Worker), so both run the same shaders and look the same.
+//
+// What it does, per frame (see docs/research/2026-11-15-sf1/README.md for the sources):
+//   1. upload the frame (a <video>, VideoFrame, ImageBitmap or canvas) to one RGBA8 texture, cover-cropped to the
+//      output frame the way the export's drawCover does;
+//   2. at a quarter of the size (270 x 480 for 1080 x 1920) keep the local mean colour and the mean of luma squared,
+//      blurred by a separable Gaussian (sigma about 12 px of the full frame). Mean and variance at low resolution is
+//      the "fast guided filter" idea (He and Sun: subsample inside the filter, "almost no visible degradation");
+//   3. at full size, split the picture into a low layer F (a ~3 px blur) and a detail layer I - F (pores, hair, grain:
+//      frequency separation), and edit only F:
+//        - smoothing: F moves towards the guided-filter output mean + a (F - mean), a = var / (var + eps), so edges
+//          (eyes, brows, lips, hair: high local variance) keep their shape and flat skin evens out;
+//        - blemishes: a quarter-size pass marks spots darker and/or redder than every point of a ring around them
+//          (an edge never is: half its ring lies on its dark side); there F is replaced by the ring's colour ("heal");
+//      both only where the colour is skin-like (a soft hue band in the CbCr plane), then the detail layer is added back, so the
+//      skin keeps its texture (the "Skin texture" control can soften fine grain on skin a little).
+// No face model, no network: the cheapest approach that can look natural.
+
+const VS = `#version 300 es
+void main() {
+  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}`;
+
+// shared: output-frame uv (row 0 = top) -> source uv through the cover crop
+const COMMON = `#version 300 es
+precision highp float;
+uniform vec4 uCrop;     // source uv = uCrop.xy + uv * uCrop.zw
+uniform vec2 uOut;      // size of the pass's render target (px)
+uniform float uFlipY;   // 1 when the target is the canvas (row 0 = bottom)
+vec2 fragUv() {
+  vec2 uv = gl_FragCoord.xy / uOut;
+  if (uFlipY > 0.5) uv.y = 1.0 - uv.y;
+  return uv;
+}
+float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+`;
+
+// pass 1: source -> quarter size: mean rgb (4 bilinear taps of 2x2 pixels = a 4x4 box) and mean luma^2
+const FS_DOWN = COMMON + `
+uniform sampler2D uSrc;
+uniform vec2 uSrcPx; // one source pixel in source uv
+out vec4 o;
+void main() {
+  vec2 s = uCrop.xy + fragUv() * uCrop.zw;
+  // a quarter-size texel covers about (4 * uCrop.zw / uSrcPx / outFull) source px; 4 taps at +-1 px around it
+  vec3 a = texture(uSrc, s + uSrcPx * vec2(-1.0, -1.0)).rgb;
+  vec3 b = texture(uSrc, s + uSrcPx * vec2( 1.0, -1.0)).rgb;
+  vec3 c = texture(uSrc, s + uSrcPx * vec2(-1.0,  1.0)).rgb;
+  vec3 d = texture(uSrc, s + uSrcPx * vec2( 1.0,  1.0)).rgb;
+  float la = luma(a), lb = luma(b), lc = luma(c), ld = luma(d);
+  o = vec4((a + b + c + d) * 0.25, (la * la + lb * lb + lc * lc + ld * ld) * 0.25);
+}`;
+
+// pass 2 and 3: separable Gaussian on the quarter-size target (9 taps as 5 bilinear reads, sigma ~ 3 texels)
+const FS_BLUR = COMMON + `
+uniform sampler2D uIn;
+uniform vec2 uDir; // one texel along the blur axis, in uv
+out vec4 o;
+void main() {
+  vec2 uv = gl_FragCoord.xy / uOut;
+  o = texture(uIn, uv) * 0.2270270270
+    + (texture(uIn, uv + uDir * 1.3846153846) + texture(uIn, uv - uDir * 1.3846153846)) * 0.3162162162
+    + (texture(uIn, uv + uDir * 3.2307692308) + texture(uIn, uv - uDir * 3.2307692308)) * 0.0702702703;
+}`;
+
+// shared: soft skin-likeness from the hue and saturation in the CbCr plane (BT.601 weights), 0..1. Skin of every tone
+// sits in a narrow hue band (about 40 to 62 degrees from the -Cb axis towards +Cr); blonde and brown hair is yellower
+// (about 30 degrees), lips are redder (about 69), grey and white backgrounds have almost no saturation.
+const SKIN = `
+float skin(vec3 c) {
+  float y = dot(c, vec3(0.299, 0.587, 0.114));
+  float cb = dot(c, vec3(-0.168736, -0.331264, 0.5));
+  float cr = dot(c, vec3(0.5, -0.418688, -0.081312));
+  float sat = length(vec2(cb, cr));
+  float ang = atan(cr, -cb);
+  return smoothstep(0.62, 0.72, ang) * (1.0 - smoothstep(1.08, 1.18, ang))
+       * smoothstep(0.022, 0.045, sat) * (1.0 - smoothstep(0.24, 0.32, sat))
+       * smoothstep(0.06, 0.16, y);
+}
+`;
+
+// pass 4: blemish spots at quarter size, from the unblurred quarter texture: a texel darker and/or redder than every
+// point of a ring around it (radius 4 texels, about 16 px) is a spot; an edge is not (half its ring is on the dark
+// side). Writes the ring's mean colour premultiplied by the spot mask, so a blur grows the mask over the spot's rim.
+const FS_SPOT = COMMON + SKIN + `
+uniform sampler2D uIn;
+uniform vec2 uTexel;
+out vec4 o;
+void main() {
+  vec2 uv = gl_FragCoord.xy / uOut;
+  vec3 c = texture(uIn, uv).rgb;
+  float yc = luma(c);
+  float rc = c.r - c.g;
+  float minY = 1.0;
+  float maxY = 0.0;
+  float maxR = -1.0;
+  vec3 sum = vec3(0.0);
+  for (int i = 0; i < 8; i++) {
+    float t = float(i) * 0.785398;
+    vec3 r = texture(uIn, uv + uTexel * 4.0 * vec2(cos(t), sin(t))).rgb;
+    sum += r;
+    minY = min(minY, luma(r));
+    maxY = max(maxY, luma(r));
+    maxR = max(maxR, r.r - r.g);
+  }
+  vec3 ring = sum * 0.125;
+  float dark = minY - yc;
+  float score = max(dark, 0.0) + 1.2 * max(rc - maxR, 0.0);
+  // blemishes sit in even skin: a ring that spans eye whites, lashes, teeth or lips is no blemish's surroundings
+  float even = 1.0 - smoothstep(0.14, 0.24, maxY - minY);
+  float m = smoothstep(0.012, 0.045, score) * (1.0 - smoothstep(0.2, 0.32, dark)) * even * skin(ring);
+  o = vec4(ring * m, m);
+}`;
+
+// pass 7: full size, the look
+const FS_FINAL = COMMON + SKIN + `
+uniform sampler2D uSrc;
+uniform sampler2D uLow;
+uniform sampler2D uSpot;
+uniform vec2 uSrcPx;
+uniform float uSmooth;   // 0..1
+uniform float uBlem;     // 0..1
+uniform float uTexture;  // 0..1: 1 keeps all fine detail on skin
+uniform float uMode;     // 0 off, 1 on, 2 split (left half off), 3 skin areas
+out vec4 o;
+
+void main() {
+  vec2 uv = fragUv();
+  vec2 s = uCrop.xy + uv * uCrop.zw;
+  vec3 I = texture(uSrc, s).rgb;
+  if (uMode < 0.5 || (uMode > 1.5 && uMode < 2.5 && uv.x < 0.5)) {
+    o = vec4(I, 1.0);
+    if (uMode > 1.5 && abs(uv.x - 0.5) < 0.0012) o = vec4(1.0, 0.76, 0.16, 1.0);
+    return;
+  }
+  // low layer F: ~3 px blur from 4 bilinear taps of 2x2 pixels in a rotated pattern
+  vec4 L = texture(uLow, uv);
+  vec3 M = L.rgb;
+  float skM = skin(M);
+  // not skin (hair, clothes, background: most of a frame): the source pixel, no more reads
+  if (skM < 0.002 && uMode < 2.5) { o = vec4(I, 1.0); return; }
+  vec3 F = 0.25 * (texture(uSrc, s + uSrcPx * vec2(-1.5, -0.5)).rgb + texture(uSrc, s + uSrcPx * vec2(0.5, -1.5)).rgb
+                 + texture(uSrc, s + uSrcPx * vec2(1.5, 0.5)).rgb + texture(uSrc, s + uSrcPx * vec2(-0.5, 1.5)).rgb);
+  float yM = luma(M);
+  float v = max(L.a - yM * yM, 0.0);
+  float sk = skM * skin(mix(F, M, 0.5));
+
+  // smoothing: the guided-filter output on the low layer; eps grows with the strength
+  float eps = mix(0.0003, 0.0060, uSmooth);
+  float a = v / (v + eps);
+  vec3 G = M + a * (F - M);
+  vec3 low = mix(F, G, clamp(uSmooth * 1.15, 0.0, 1.0) * sk);
+
+  // blemishes: healed towards the colour around the spot
+  vec4 sp = texture(uSpot, uv);
+  float bm = clamp(sp.a * 3.0, 0.0, 1.0);
+  vec3 heal = sp.rgb / max(sp.a, 1e-4);
+  float kB = clamp(bm * uBlem * 1.8, 0.0, 1.0);
+  low = mix(low, heal + 0.25 * (G - M), kB);
+
+  vec3 D = I - F;
+  float keep = mix(1.0, uTexture, sk) * (1.0 - 0.6 * kB);
+  vec3 outc = low + D * keep;
+
+  if (uMode > 2.5) {
+    outc = mix(I, vec3(1.0, 0.25, 0.85), 0.45 * sk);
+    outc = mix(outc, vec3(0.1, 0.95, 1.0), 0.85 * bm);
+  }
+  o = vec4(clamp(outc, 0.0, 1.0), 1.0);
+}`;
+
+function compile(gl, type, src) {
+  const sh = gl.createShader(type);
+  gl.shaderSource(sh, src);
+  gl.compileShader(sh);
+  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error('shader: ' + gl.getShaderInfoLog(sh));
+  return sh;
+}
+
+function program(gl, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl, gl.VERTEX_SHADER, VS));
+  gl.attachShader(p, compile(gl, gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error('link: ' + gl.getProgramInfoLog(p));
+  const u = {};
+  const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++) {
+    const name = gl.getActiveUniform(p, i).name;
+    u[name] = gl.getUniformLocation(p, name);
+  }
+  return { p, u };
+}
+
+const SKIN_DEFAULTS = Object.freeze({ smooth: 0.35, blemish: 0.7, texture: 0.85 });
+
+class SkinFilter {
+  /** @param canvas HTMLCanvasElement or OffscreenCanvas; its size is the output frame size */
+  constructor(canvas) {
+    const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false, stencil: false, premultipliedAlpha: false, preserveDrawingBuffer: false, powerPreference: 'high-performance' });
+    if (!gl) throw new Error('WebGL2 is not available');
+    this.canvas = canvas;
+    this.gl = gl;
+    // half-float targets keep the variance precise; RGBA8 is the fallback (coarser variance, same look otherwise)
+    this.halfFloat = !!gl.getExtension('EXT_color_buffer_half_float') || !!gl.getExtension('EXT_color_buffer_float');
+    this.pDown = program(gl, FS_DOWN);
+    this.pBlur = program(gl, FS_BLUR);
+    this.pSpot = program(gl, FS_SPOT);
+    this.pFinal = program(gl, FS_FINAL);
+    this.vao = gl.createVertexArray();
+    this.src = this.tex();
+    this.srcW = 0;
+    this.srcH = 0;
+    this.q = [];
+    this.qW = 0;
+    this.qH = 0;
+    this.params = { ...SKIN_DEFAULTS };
+    this.mode = 1;
+  }
+
+  tex() {
+    const gl = this.gl;
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return t;
+  }
+
+  ensureTargets() {
+    const gl = this.gl;
+    const w = Math.max(1, Math.round(this.canvas.width / 4));
+    const h = Math.max(1, Math.round(this.canvas.height / 4));
+    if (w === this.qW && h === this.qH) return;
+    for (const t of this.q) {
+      gl.deleteTexture(t.tex);
+      gl.deleteFramebuffer(t.fb);
+    }
+    this.q = [0, 1, 2, 3].map(() => {
+      const tex = this.tex();
+      if (this.halfFloat) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+      else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      const fb = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+        if (this.halfFloat) {
+          this.halfFloat = false;
+          this.qW = 0;
+          return null;
+        }
+        throw new Error('framebuffer incomplete');
+      }
+      return { tex, fb };
+    });
+    if (this.q.includes(null)) {
+      this.q = [];
+      return this.ensureTargets();
+    }
+    this.qW = w;
+    this.qH = h;
+  }
+
+  /** Uploads a frame: anything texImage2D takes (HTMLVideoElement, VideoFrame, ImageBitmap, canvas). */
+  upload(source, w, h) {
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, this.src);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, source);
+    this.srcW = w;
+    this.srcH = h;
+  }
+
+  /** the export's cover crop: source uv rect for the output frame */
+  crop() {
+    const ow = this.canvas.width;
+    const oh = this.canvas.height;
+    const s = Math.max(ow / this.srcW, oh / this.srcH);
+    const sw = ow / s / this.srcW;
+    const sh = oh / s / this.srcH;
+    return [(1 - sw) / 2, (1 - sh) / 2, sw, sh];
+  }
+
+  /** Draws the uploaded frame to the canvas with the filter (mode 0 off, 1 on, 2 split, 3 skin areas). */
+  draw() {
+    const gl = this.gl;
+    const ow = this.canvas.width;
+    const oh = this.canvas.height;
+    const crop = this.crop();
+    const px = [1 / this.srcW, 1 / this.srcH];
+    gl.bindVertexArray(this.vao);
+    gl.disable(gl.BLEND);
+    const P = this.params;
+    if (this.mode !== 0) {
+      this.ensureTargets();
+      // A: the source at quarter size (mean rgb, mean luma^2); C: A blurred (the local mean and variance);
+      // D: the blemish spots, grown over their rims by the same blur (B is the scratch target)
+      const [A, B, C, D] = this.q;
+      const pass = (prog, target) => {
+        gl.useProgram(prog.p);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, target.fb);
+        gl.viewport(0, 0, this.qW, this.qH);
+        gl.uniform2f(prog.u.uOut, this.qW, this.qH);
+        gl.uniform1f(prog.u.uFlipY, 0);
+      };
+      const blur = (from, to) => {
+        pass(this.pBlur, B);
+        gl.uniform1i(this.pBlur.u.uIn, 0);
+        gl.bindTexture(gl.TEXTURE_2D, from.tex);
+        gl.uniform2f(this.pBlur.u.uDir, 1 / this.qW, 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        pass(this.pBlur, to);
+        gl.bindTexture(gl.TEXTURE_2D, B.tex);
+        gl.uniform2f(this.pBlur.u.uDir, 0, 1 / this.qH);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      };
+      gl.activeTexture(gl.TEXTURE0);
+      pass(this.pDown, A);
+      gl.bindTexture(gl.TEXTURE_2D, this.src);
+      gl.uniform1i(this.pDown.u.uSrc, 0);
+      gl.uniform4fv(this.pDown.u.uCrop, crop);
+      gl.uniform2fv(this.pDown.u.uSrcPx, px);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      blur(A, C);
+      if (P.blemish > 0 || this.mode === 3) {
+        pass(this.pSpot, D);
+        gl.bindTexture(gl.TEXTURE_2D, A.tex);
+        gl.uniform1i(this.pSpot.u.uIn, 0);
+        gl.uniform2f(this.pSpot.u.uTexel, 1 / this.qW, 1 / this.qH);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        blur(D, D);
+      } else {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, D.fb);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+      }
+    }
+    // final (mode 0 runs the same pass and returns the source pixel: the same upload and draw cost minus the filter)
+    gl.useProgram(this.pFinal.p);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, ow, oh);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.src);
+    gl.uniform1i(this.pFinal.u.uSrc, 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.mode !== 0 ? this.q[2].tex : this.src);
+    gl.uniform1i(this.pFinal.u.uLow, 1);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.mode !== 0 ? this.q[3].tex : this.src);
+    gl.uniform1i(this.pFinal.u.uSpot, 2);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform4fv(this.pFinal.u.uCrop, crop);
+    gl.uniform2f(this.pFinal.u.uOut, ow, oh);
+    gl.uniform1f(this.pFinal.u.uFlipY, 1);
+    gl.uniform2fv(this.pFinal.u.uSrcPx, px);
+    gl.uniform1f(this.pFinal.u.uSmooth, P.smooth);
+    gl.uniform1f(this.pFinal.u.uBlem, P.blemish);
+    gl.uniform1f(this.pFinal.u.uTexture, P.texture);
+    gl.uniform1f(this.pFinal.u.uMode, this.mode);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  /** Waits for the GPU (a 1 px read): for measuring only, it stalls the pipeline. */
+  sync() {
+    const gl = this.gl;
+    const b = new Uint8Array(4);
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, b);
+  }
+
+  info() {
+    const gl = this.gl;
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    return {
+      renderer: dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
+      vendor: dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR),
+      maxTexture: gl.getParameter(gl.MAX_TEXTURE_SIZE),
+      lowTargets: this.halfFloat ? 'RGBA16F' : 'RGBA8',
+    };
+  }
+}
+
+
+const PROBE = 'sf1-probe-1';
+const $ = (id) => document.getElementById(id);
+const video = $('v');
+const canvas = $('c');
+const note = (t, err = false) => { $('note').textContent = t; $('note').className = err ? 'note err' : 'note'; };
+
+let filter = null;
+let filterErr = '';
+try { filter = new SkinFilter(canvas); } catch (e) { filterErr = String(e && e.message || e); note('The filter could not start: ' + filterErr, true); }
+
+// ---------- controls ----------
+const sliders = ['smooth', 'blemish', 'texture'];
+function showSlider(k) {
+  const el = $(k);
+  el.style.setProperty('--pct', el.value + '%');
+  $(k + 'Out').textContent = el.value;
+}
+function setParams(p) {
+  for (const k of sliders) { $(k).value = Math.round(p[k] * 100); showSlider(k); }
+  if (filter) Object.assign(filter.params, p);
+  redraw();
+}
+for (const k of sliders) $(k).addEventListener('input', () => { showSlider(k); if (filter) filter.params[k] = $(k).value / 100; redraw(); });
+$('reset').onclick = () => setParams(SKIN_DEFAULTS);
+
+let mode = 1;
+function setMode(m) {
+  mode = m;
+  for (const b of $('seg').querySelectorAll('button')) b.setAttribute('aria-pressed', String(Number(b.dataset.mode) === m));
+  if (filter) filter.mode = m;
+  stats.reset();
+  redraw();
+}
+for (const b of $('seg').querySelectorAll('button')) b.onclick = () => setMode(Number(b.dataset.mode));
+
+// hold the picture: the original while held
+let held = false;
+const stage = $('stage');
+stage.addEventListener('pointerdown', (e) => { if (!filter) return; held = true; filter.mode = 0; $('hint').hidden = false; stage.setPointerCapture(e.pointerId); redraw(); });
+const release = () => { if (!held) return; held = false; if (filter) filter.mode = mode; $('hint').hidden = true; redraw(); };
+stage.addEventListener('pointerup', release);
+stage.addEventListener('pointercancel', release);
+
+// ---------- sources ----------
+let stream = null;
+let fileName = '';
+function stopCamera() { if (stream) { for (const t of stream.getTracks()) t.stop(); stream = null; } }
+$('open').onclick = () => $('file').click();
+$('file').onchange = () => {
+  const f = $('file').files && $('file').files[0];
+  if (!f) return;
+  stopCamera();
+  if (video.src) URL.revokeObjectURL(video.src);
+  video.srcObject = null;
+  fileName = f.name + ' (' + (f.size / 1e6).toFixed(1) + ' MB, ' + (f.type || 'unknown type') + ')';
+  video.src = URL.createObjectURL(f);
+  video.load();
+  ready('file');
+};
+$('camera').onclick = async () => {
+  try {
+    stopCamera();
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+    if (video.src) { URL.revokeObjectURL(video.src); video.removeAttribute('src'); }
+    video.srcObject = stream;
+    fileName = 'front camera';
+    ready('camera');
+    await video.play();
+  } catch (e) { note('The camera did not open: ' + (e && e.name || e), true); }
+};
+function ready(kind) {
+  $('empty').hidden = true;
+  $('play').disabled = false;
+  note(kind === 'camera' ? 'Camera on.' : 'Video loaded. Tap Play.');
+  video.addEventListener('loadeddata', () => { drawNow(); }, { once: true });
+  stats.reset();
+}
+$('play').onclick = async () => {
+  if (video.paused) { try { await video.play(); } catch (e) { note('Play was refused: ' + (e && e.name || e), true); } }
+  else video.pause();
+};
+video.addEventListener('play', () => { $('play').textContent = 'Pause'; stats.reset(); });
+video.addEventListener('pause', () => { $('play').textContent = 'Play'; });
+
+// ---------- render + measure ----------
+const now = () => performance.now();
+const stats = {
+  reset() {
+    this.t0 = now(); this.frames = 0; this.missed = 0; this.lastPresented = -1; this.submit = []; this.synced = [];
+    const q = video.getVideoPlaybackQuality ? video.getVideoPlaybackQuality() : null;
+    this.drop0 = q ? q.droppedVideoFrames : 0; this.total0 = q ? q.totalVideoFrames : 0;
+  },
+};
+stats.reset();
+
+const SYNC_EVERY = 10;
+function drawNow() {
+  if (!filter || !video.videoWidth) return 0;
+  const t = now();
+  filter.upload(video, video.videoWidth, video.videoHeight);
+  filter.draw();
+  const sync = stats.frames % SYNC_EVERY === SYNC_EVERY - 1;
+  if (sync) filter.sync();
+  const ms = now() - t;
+  if (sync) stats.synced.push(ms); else stats.submit.push(ms);
+  return ms;
+}
+function redraw() { if (video.paused && video.videoWidth) drawNow(); }
+
+const hasVfc = typeof video.requestVideoFrameCallback === 'function';
+function onFrame(_t, meta) {
+  if (!video.paused && !held) {
+    // a presented-frames jump of more than one: frames the video showed that the filter never drew
+    if (stats.lastPresented >= 0 && meta && meta.presentedFrames > stats.lastPresented + 1) stats.missed += meta.presentedFrames - stats.lastPresented - 1;
+    if (meta) stats.lastPresented = meta.presentedFrames;
+    drawNow();
+    stats.frames++;
+  } else if (held) drawNow();
+  schedule();
+}
+function schedule() { if (hasVfc) video.requestVideoFrameCallback(onFrame); else requestAnimationFrame((t) => onFrame(t, null)); }
+schedule();
+
+const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
+const pct = (a, p) => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
+function snapshot() {
+  const el = (now() - stats.t0) / 1000;
+  const q = video.getVideoPlaybackQuality ? video.getVideoPlaybackQuality() : null;
+  return {
+    seconds: +el.toFixed(1),
+    fps: el > 0 ? +(stats.frames / el).toFixed(1) : 0,
+    framesDrawn: stats.frames,
+    missedByFilter: stats.missed,
+    droppedByVideo: q ? q.droppedVideoFrames - stats.drop0 : null,
+    decodedByVideo: q ? q.totalVideoFrames - stats.total0 : null,
+    submitMsAvg: +avg(stats.submit).toFixed(2), submitMsP95: +pct(stats.submit, 0.95).toFixed(2),
+    gpuSyncedMsAvg: +avg(stats.synced).toFixed(2), gpuSyncedMsP95: +pct(stats.synced, 0.95).toFixed(2), gpuSyncedSamples: stats.synced.length,
+  };
+}
+const MODE_NAMES = { 0: 'off', 1: 'on', 2: 'split', 3: 'skin areas' };
+setInterval(() => {
+  if (video.paused) return;
+  const s = snapshot();
+  $('stats').textContent = `Filter ${MODE_NAMES[mode]} · ${s.fps} fps\nMissed ${s.missedByFilter} · dropped ${s.droppedByVideo ?? 'n/a'}\nFilter time ${s.gpuSyncedMsAvg} ms (GPU, avg) · ${s.submitMsAvg} ms (submit)`;
+}, 500);
+
+function report() {
+  const s = snapshot();
+  const i = filter ? filter.info() : {};
+  return [
+    `Juntu skin filter probe (${PROBE})`,
+    `Time: ${new Date().toISOString()}`,
+    `Browser: ${navigator.userAgent}`,
+    `Screen: ${screen.width}x${screen.height} @${devicePixelRatio}x, cores ${navigator.hardwareConcurrency ?? 'n/a'}`,
+    `WebGL2: ${filter ? 'yes' : 'no' + (filterErr ? ' (' + filterErr + ')' : '')}; GPU ${i.renderer ?? 'n/a'} (${i.vendor ?? 'n/a'}); max texture ${i.maxTexture ?? 'n/a'}; low targets ${i.lowTargets ?? 'n/a'}`,
+    `Frame callback: ${hasVfc ? 'requestVideoFrameCallback' : 'requestAnimationFrame'}`,
+    `Source: ${fileName || 'none'}; ${video.videoWidth}x${video.videoHeight}; output ${canvas.width}x${canvas.height}`,
+    `Filter: ${MODE_NAMES[mode]}; smoothing ${$('smooth').value}, blemish reduction ${$('blemish').value}, skin texture ${$('texture').value}`,
+    `Measured over ${s.seconds} s while playing: ${s.fps} fps drawn (${s.framesDrawn} frames)`,
+    `Frames the video showed but the filter missed: ${s.missedByFilter}`,
+    `Dropped by the video: ${s.droppedByVideo ?? 'n/a'} of ${s.decodedByVideo ?? 'n/a'}`,
+    `Per-frame filter time, GPU finished (1 in ${SYNC_EVERY} frames): avg ${s.gpuSyncedMsAvg} ms, p95 ${s.gpuSyncedMsP95} ms (${s.gpuSyncedSamples} samples)`,
+    `Per-frame filter time, submit only: avg ${s.submitMsAvg} ms, p95 ${s.submitMsP95} ms`,
+  ].join('\n');
+}
+$('copy').onclick = async () => {
+  const text = report();
+  $('report').textContent = text;
+  $('report').hidden = false;
+  try { await navigator.clipboard.writeText(text); note('Copied.'); }
+  catch {
+    const r = document.createRange(); r.selectNodeContents($('report'));
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    note(document.execCommand('copy') ? 'Copied.' : 'Select the text below and copy it.');
+  }
+};
+
+setParams(SKIN_DEFAULTS);
+window.sfProbe = { snapshot, report, setMode, setParams, resetStats: () => stats.reset(), video, filter };
+</script>
+</body>
+</html>
