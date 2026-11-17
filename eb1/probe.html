@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Juntu export quality probe</title>
+<style>
+  :root { --bg: #fff; --fg: #111; --muted: #555; --line: #ddd; --ok: #0a6b2b; --bad: #a11; --accent: #1f5fd1; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #111; --fg: #eee; --muted: #aaa; --line: #333; --ok: #5c5; --bad: #f77; --accent: #7aa7ff; } }
+  :root[data-theme="dark"] { --bg: #111; --fg: #eee; --muted: #aaa; --line: #333; --ok: #5c5; --bad: #f77; --accent: #7aa7ff; }
+  body { background: var(--bg); color: var(--fg); font: 16px/1.45 -apple-system, system-ui, sans-serif; margin: 0 auto; max-width: 820px; padding: 16px; }
+  h1 { font-size: 1.3rem; margin: 0 0 8px; }
+  ol { padding-left: 1.3em; } li { margin: 4px 0; }
+  button { font: inherit; padding: 10px 16px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; margin: 4px 8px 4px 0; }
+  button:disabled { opacity: .5; }
+  button.secondary { background: transparent; color: var(--accent); }
+  #status { font-weight: 600; margin: 8px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; margin: 8px 0; }
+  th, td { border-bottom: 1px solid var(--line); padding: 4px 6px; text-align: left; vertical-align: top; }
+  td.n { text-align: right; font-variant-numeric: tabular-nums; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .muted { color: var(--muted); }
+  textarea { width: 100%; box-sizing: border-box; height: 220px; font: 12px/1.3 ui-monospace, Menlo, monospace; background: var(--bg); color: var(--fg); border: 1px solid var(--line); }
+  .wrap { overflow-x: auto; }
+</style>
+</head>
+<body>
+<h1>Juntu export quality probe (EB1)</h1>
+<p class="muted">Encodes the same 10-second 1080x1920 test video with several encoder settings and measures the real bitrate and picture quality on this device. Nothing is uploaded: everything stays on this device.</p>
+<ol>
+  <li>Close Juntu and other apps. Keep the iPad plugged in and the screen on.</li>
+  <li>Tap <b>Run all</b>. Do not switch apps, and touch the screen now and then so it does not lock, while it runs (about 5 minutes).</li>
+  <li>When the status line says <b>Done: 14 of 14</b>, tap <b>Copy results</b> and paste the text to the coordinator.</li>
+</ol>
+<button id="run">Run all</button>
+<button id="copy" class="secondary" disabled>Copy results</button>
+<div id="status">Ready.</div>
+<div class="wrap"><table id="tbl">
+  <thead><tr><th>#</th><th>Setting</th><th>Asked Mbit/s</th><th>Got Mbit/s</th><th>Encode s</th><th>PSNR dB</th><th>SSIM</th><th>Note</th></tr></thead>
+  <tbody></tbody>
+</table></div>
+<textarea id="out" readonly placeholder="Results appear here."></textarea>
+<script>
+'use strict';
+// ---- test sequence: deterministic, 1080x1920, 30 fps, 10 s (Ken Burns over a detailed picture, film grain, moving text) ----
+const W = 1080, H = 1920, FPS = 30, SECONDS = 10, N = FPS * SECONDS;
+const SAMPLE = Array.from({ length: SECONDS }, (_, s) => s * FPS + 15); // the 10 frames the quality score is measured on
+const q = new URLSearchParams(location.search);
+const PROBE_VERSION = 'eb1-1';
+
+function rng(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); }
+let picture = null, grain = [];
+function buildAssets() {
+  // a "photo": smooth gradients plus fine detail (sum of sines with a seeded noise texture), 1.25x the frame for panning
+  const pw = Math.round(W * 1.25), ph = Math.round(H * 1.25);
+  const c = new OffscreenCanvas(pw, ph), x = c.getContext('2d');
+  const img = x.createImageData(pw, ph), d = img.data, r = rng(7);
+  for (let y = 0; y < ph; y++) for (let i = 0; i < pw; i++) {
+    const k = (y * pw + i) * 4, n = (r() - 0.5) * 36;
+    const a = Math.sin(i * 0.011 + Math.sin(y * 0.004) * 3), b = Math.sin(y * 0.017 + i * 0.003), f = Math.sin(i * 0.31) * Math.sin(y * 0.29);
+    d[k] = 128 + 70 * a + 20 * f + n; d[k + 1] = 120 + 60 * b + 25 * f + n; d[k + 2] = 110 + 50 * a * b + 30 * f + n; d[k + 3] = 255;
+  }
+  x.putImageData(img, 0, 0);
+  x.fillStyle = 'rgba(255,255,255,.85)'; x.font = 'bold 54px sans-serif';
+  for (let row = 0; row < 24; row++) x.fillText('Juntu probe detail line ' + row + ' - the quick brown fox 0123456789', 40, 120 + row * 95);
+  picture = c;
+  // 4 grain tiles (256x256, light noise), cycled per frame like film grain
+  for (let t = 0; t < 4; t++) {
+    const g = new OffscreenCanvas(256, 256), gx = g.getContext('2d'), gi = gx.createImageData(256, 256), r2 = rng(100 + t);
+    for (let k = 0; k < gi.data.length; k += 4) { const v = r2() * 255; gi.data[k] = gi.data[k + 1] = gi.data[k + 2] = v; gi.data[k + 3] = 22; }
+    gx.putImageData(gi, 0, 0); grain.push(g);
+  }
+}
+const canvas = new OffscreenCanvas(W, H);
+const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: false });
+function drawFrame(i, c = ctx) {
+  const t = i / N;
+  const z = 1 + 0.2 * t, pw = picture.width, ph = picture.height;
+  const sw = W / z * 1.0, sh = H / z * 1.0;
+  const sx = (pw - sw) * (0.2 + 0.6 * t), sy = (ph - sh) * (0.7 - 0.5 * t);
+  c.drawImage(picture, sx, sy, sw, sh, 0, 0, W, H);
+  const g = grain[i % 4];
+  for (let y = 0; y < H; y += 256) for (let x = 0; x < W; x += 256) c.drawImage(g, x, y);
+  c.fillStyle = 'rgba(0,0,0,.45)'; c.fillRect(0, H * 0.72, W, 220);
+  c.fillStyle = '#fff'; c.font = 'bold 72px sans-serif';
+  c.fillText('Frame ' + String(i).padStart(3, '0') + '  moving caption', 60 + 40 * Math.sin(i / 9), H * 0.72 + 130);
+  for (let b = 0; b < 6; b++) { c.beginPath(); c.fillStyle = `hsl(${(b * 60 + i * 3) % 360} 80% 55%)`; c.arc(540 + 380 * Math.sin(i / 20 + b), 400 + b * 120, 50, 0, 7); c.fill(); }
+}
+
+// ---- candidates ----
+const C = [];
+const add = (id, label, o) => C.push({ id, label, ...o });
+add('A', 'Juntu today: H.264 High 4.0, 8 Mbit/s, variable', { codec: 'avc1.640028', bitrate: 8e6 });
+add('B', 'H.264 High 4.0, no bitrate given', { codec: 'avc1.640028', bitrate: undefined });
+add('C', 'H.264 High 4.0, 16 Mbit/s', { codec: 'avc1.640028', bitrate: 16e6 });
+add('D', 'H.264 High 5.0, 20 Mbit/s', { codec: 'avc1.640032', bitrate: 20e6 });
+add('E', 'H.264 High 4.0, 8 Mbit/s, constant', { codec: 'avc1.640028', bitrate: 8e6, bitrateMode: 'constant' });
+add('F', 'H.264 High 4.0, 8 Mbit/s, latency realtime', { codec: 'avc1.640028', bitrate: 8e6, latencyMode: 'realtime' });
+add('G', 'H.264 High 4.0, 8 Mbit/s, one keyframe only', { codec: 'avc1.640028', bitrate: 8e6, keyEvery: 0 });
+add('H', 'H.264 High 4.0, quantizer 24 per frame', { codec: 'avc1.640028', bitrate: undefined, bitrateMode: 'quantizer', qp: 24 });
+add('I', 'HEVC Main (hvc1), 8 Mbit/s', { codec: 'hvc1.1.6.L123.B0', bitrate: 8e6 });
+add('J', 'HEVC Main (hvc1), 16 Mbit/s', { codec: 'hvc1.1.6.L123.B0', bitrate: 16e6 });
+add('K', 'Juntu today, fed at real time (30 fps)', { codec: 'avc1.640028', bitrate: 8e6, paced: true });
+add('L', 'H.264 16 Mbit/s, fed at real time (30 fps)', { codec: 'avc1.640028', bitrate: 16e6, paced: true });
+add('M', 'MediaRecorder MP4, 8 Mbit/s (real time)', { recorder: true, bitrate: 8e6 });
+add('N', 'MediaRecorder MP4, 16 Mbit/s (real time)', { recorder: true, bitrate: 16e6 });
+const only = q.get('only'); // harness: ?only=A,C
+const RUN = only ? C.filter((c) => only.split(',').includes(c.id)) : C;
+
+// ---- quality: PSNR and SSIM on luma (BT.709 weights), 8x8 windows stepping 4 like ffmpeg's ssim filter ----
+function luma(rgba) { const y = new Float32Array(rgba.length / 4); for (let i = 0, k = 0; k < rgba.length; i++, k += 4) y[i] = 0.2126 * rgba[k] + 0.7152 * rgba[k + 1] + 0.0722 * rgba[k + 2]; return y; }
+function psnr(a, b) { let s = 0; for (let i = 0; i < a.length; i++) { const d = a[i] - b[i]; s += d * d; } const mse = s / a.length; return mse === 0 ? 99 : 10 * Math.log10(255 * 255 / mse); }
+function ssim(a, b, w = W, h = H) {
+  const c1 = (0.01 * 255) ** 2, c2 = (0.03 * 255) ** 2; let sum = 0, n = 0;
+  for (let y = 0; y + 8 <= h; y += 4) for (let x = 0; x + 8 <= w; x += 4) {
+    let sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0;
+    for (let j = 0; j < 8; j++) { const o = (y + j) * w + x; for (let i = 0; i < 8; i++) { const p = a[o + i], r = b[o + i]; sa += p; sb += r; saa += p * p; sbb += r * r; sab += p * r; } }
+    const ma = sa / 64, mb = sb / 64, va = saa / 64 - ma * ma, vb = sbb / 64 - mb * mb, cov = sab / 64 - ma * mb;
+    sum += ((2 * ma * mb + c1) * (2 * cov + c2)) / ((ma * ma + mb * mb + c1) * (va + vb + c2)); n++;
+  }
+  return sum / n;
+}
+const readCanvas = new OffscreenCanvas(W, H), readCtx = readCanvas.getContext('2d', { willReadFrequently: true });
+function sourceRGBA(i) { drawFrame(i, readCtx); return readCtx.getImageData(0, 0, W, H).data; }
+function frameRGBA(vf) { readCtx.drawImage(vf, 0, 0, W, H); return readCtx.getImageData(0, 0, W, H).data; }
+
+// ---- harness hooks (Chromium only; the iPad never uses them) ----
+window.__dump = { annexb: {}, frames: {} };
+const keepFrames = q.get('keep'); // e.g. ?keep=A means keep source+decoded RGBA of SAMPLE[0..1] for that candidate
+function b64(u8) { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); }
+function toAnnexB(chunks, desc) {
+  const d = new Uint8Array(desc), out = []; const sc = [0, 0, 0, 1];
+  const lenSize = (d[4] & 3) + 1; let p = 5; const ps = [];
+  let n = d[p++] & 31; for (let i = 0; i < n; i++) { const l = (d[p] << 8) | d[p + 1]; p += 2; ps.push(d.slice(p, p + l)); p += l; }
+  n = d[p++]; for (let i = 0; i < n; i++) { const l = (d[p] << 8) | d[p + 1]; p += 2; ps.push(d.slice(p, p + l)); p += l; }
+  for (const c of chunks) {
+    if (c.key) for (const x of ps) out.push(...sc, ...x);
+    const b = c.data; let o = 0;
+    while (o < b.length) { let l = 0; for (let k = 0; k < lenSize; k++) l = l * 256 + b[o + k]; o += lenSize; out.push(...sc); for (let k = 0; k < l; k++) out.push(b[o + k]); o += l; }
+  }
+  return new Uint8Array(out);
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const r2 = (x, d = 2) => (x == null || !isFinite(x) ? null : Math.round(x * 10 ** d) / 10 ** d);
+function withTimeout(p, ms, what) { return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(what + ' timed out after ' + ms / 1000 + ' s')), ms))]); }
+
+async function runEncoder(c, onStep) {
+  const cfg = { codec: c.codec, width: W, height: H, framerate: FPS, hardwareAcceleration: 'no-preference' };
+  if (c.bitrate) cfg.bitrate = c.bitrate;
+  if (c.bitrateMode) cfg.bitrateMode = c.bitrateMode;
+  if (c.latencyMode) cfg.latencyMode = c.latencyMode;
+  if (c.codec.startsWith('avc1')) cfg.avc = { format: 'avc' };
+  if (c.codec.startsWith('hvc1')) cfg.hevc = { format: 'hevc' };
+  const res = { requested: cfg };
+  let sup;
+  try { sup = await VideoEncoder.isConfigSupported(cfg); } catch (e) { return { ...res, error: 'isConfigSupported threw: ' + e.message }; }
+  if (!sup.supported) return { ...res, error: 'isConfigSupported: false' };
+  const chunks = []; let desc = null, decCfg = null, err = null;
+  const enc = new VideoEncoder({
+    output: (ch, meta) => { const b = new Uint8Array(ch.byteLength); ch.copyTo(b); chunks.push({ key: ch.type === 'key', ts: ch.timestamp, dur: ch.duration, data: b }); if (meta && meta.decoderConfig) { decCfg = meta.decoderConfig; if (meta.decoderConfig.description) desc = meta.decoderConfig.description; } },
+    error: (e) => { err = e; },
+  });
+  try { enc.configure(cfg); } catch (e) { return { ...res, error: 'configure threw: ' + e.message }; }
+  const keyEvery = c.keyEvery === 0 ? Infinity : (c.keyEvery || FPS * 2); // Juntu: a keyframe every 2 s
+  const t0 = performance.now();
+  for (let i = 0; i < N; i++) {
+    if (err) break;
+    if (c.paced) { const due = t0 + (i * 1000) / FPS; const wait = due - performance.now(); if (wait > 0) await sleep(wait); }
+    while (enc.encodeQueueSize > 4) await sleep(1); // Juntu's maxEncodeQueue
+    drawFrame(i);
+    const vf = new VideoFrame(canvas, { timestamp: Math.round((i * 1e6) / FPS), duration: Math.round(1e6 / FPS) });
+    const opts = { keyFrame: i % keyEvery === 0 };
+    if (c.bitrateMode === 'quantizer') { opts.avc = { quantizer: c.qp }; opts.hevc = { quantizer: c.qp }; }
+    try { enc.encode(vf, opts); } catch (e) { err = e; }
+    vf.close();
+    if (i % 30 === 0) onStep('encode ' + i + '/' + N);
+  }
+  if (!err) { try { await withTimeout(enc.flush(), 60000, 'flush'); } catch (e) { err = e; } }
+  const encodeMs = performance.now() - t0;
+  try { enc.close(); } catch {}
+  if (err) return { ...res, error: 'encode: ' + (err.message || err) , chunks: chunks.length };
+  const bytes = chunks.reduce((s, x) => s + x.data.length, 0);
+  const keys = chunks.filter((x) => x.key).length;
+  Object.assign(res, { frames: chunks.length, bytes, mbps: (bytes * 8) / SECONDS / 1e6, encodeMs, encodeFps: (N * 1000) / encodeMs, keyframes: keys, firstKeyKB: chunks[0] ? chunks[0].data.length / 1024 : null, decoderCodec: decCfg && decCfg.codec });
+  if (q.get('dump') && c.codec.startsWith('avc1') && desc) window.__dump.annexb[c.id] = b64(toAnnexB(chunks, desc));
+  // quality: decode everything, score the SAMPLE frames against the regenerated source
+  onStep('decode + score');
+  const scores = []; const want = new Set(SAMPLE); const decoded = new Map(); let derr = null;
+  const dec = new VideoDecoder({ output: (vf) => { const idx = Math.round((vf.timestamp * FPS) / 1e6); if (want.has(idx)) decoded.set(idx, frameRGBA(vf)); vf.close(); }, error: (e) => { derr = e; } });
+  try {
+    dec.configure({ codec: (decCfg && decCfg.codec) || c.codec, codedWidth: W, codedHeight: H, description: desc || undefined, hardwareAcceleration: 'no-preference' });
+    for (const ch of chunks) { while (dec.decodeQueueSize > 8) await sleep(1); dec.decode(new EncodedVideoChunk({ type: ch.key ? 'key' : 'delta', timestamp: ch.ts, duration: ch.dur ?? undefined, data: ch.data })); }
+    await withTimeout(dec.flush(), 60000, 'decode flush');
+  } catch (e) { derr = derr || e; }
+  try { dec.close(); } catch {}
+  if (derr) res.decodeError = String(derr.message || derr);
+  let k = 0;
+  for (const idx of SAMPLE) {
+    const d = decoded.get(idx); if (!d) continue;
+    const s = sourceRGBA(idx);
+    if (keepFrames === c.id && k < 2) window.__dump.frames[idx] = { src: b64(s), dec: b64(d) };
+    const ys = luma(s), yd = luma(d); scores.push({ idx, psnr: psnr(ys, yd), ssim: ssim(ys, yd) }); k++;
+    await sleep(0);
+  }
+  if (scores.length) { res.psnr = scores.reduce((s, x) => s + x.psnr, 0) / scores.length; res.ssim = scores.reduce((s, x) => s + x.ssim, 0) / scores.length; res.minPsnr = Math.min(...scores.map((x) => x.psnr)); res.scored = scores.length; res.perFrame = scores.map((x) => [x.idx, r2(x.psnr), r2(x.ssim, 4)]); }
+  return res;
+}
+
+async function runRecorder(c, onStep) {
+  const res = { requested: { videoBitsPerSecond: c.bitrate } };
+  if (typeof MediaRecorder === 'undefined') return { ...res, error: 'no MediaRecorder' };
+  const types = ['video/mp4;codecs=avc1.640028', 'video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=h264', 'video/webm'];
+  const mime = types.find((t) => MediaRecorder.isTypeSupported(t));
+  if (!mime) return { ...res, error: 'no supported MediaRecorder type' };
+  const el = document.createElement('canvas'); el.width = W; el.height = H; const ec = el.getContext('2d', { alpha: false });
+  const stream = el.captureStream(FPS);
+  const parts = []; const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: c.bitrate });
+  rec.ondataavailable = (e) => { if (e.data.size) parts.push(e.data); };
+  const stopped = new Promise((r) => (rec.onstop = r));
+  drawFrame(0, ec); rec.start(1000);
+  const t0 = performance.now(); let drawn = 0, late = 0;
+  for (let i = 0; i < N; i++) {
+    const due = t0 + (i * 1000) / FPS; const wait = due - performance.now();
+    if (wait > 0) await sleep(wait); else if (wait < -1000 / FPS) late++;
+    drawFrame(i, ec); drawn++;
+    if (i % 30 === 0) onStep('record ' + i + '/' + N);
+  }
+  await sleep(100); rec.stop(); await stopped; stream.getTracks().forEach((t) => t.stop());
+  const wallMs = performance.now() - t0;
+  const bytes = parts.reduce((s, b) => s + b.size, 0);
+  return { ...res, mime: rec.mimeType || mime, bytes, mbps: (bytes * 8) / (wallMs / 1000) / 1e6, encodeMs: wallMs, drawnLate: late, note: 'quality not scored (real-time capture)' };
+}
+
+// ---- UI ----
+const $ = (id) => document.getElementById(id);
+const results = [];
+function env() { return { probe: PROBE_VERSION, ua: navigator.userAgent, at: new Date().toISOString(), cores: navigator.hardwareConcurrency, size: W + 'x' + H, fps: FPS, seconds: SECONDS, standalone: !!(navigator.standalone || matchMedia('(display-mode: standalone)').matches) }; }
+function block() {
+  const lines = ['JUNTU EB1 PROBE RESULT', JSON.stringify(env())];
+  for (const r of results) lines.push(JSON.stringify(r));
+  lines.push('END ' + results.length + ' of ' + RUN.length);
+  return lines.join('\n');
+}
+function row(c, r) {
+  const tr = document.createElement('tr');
+  const asked = c.bitrate ? c.bitrate / 1e6 : (c.bitrateMode === 'quantizer' ? 'qp ' + c.qp : 'none');
+  const note = r.error ? r.error : r.decodeError ? 'decode: ' + r.decodeError : r.note || (r.keyframes != null ? r.keyframes + ' keyframes, ' + r2(r.encodeFps, 1) + ' fps' : '');
+  tr.innerHTML = `<td>${c.id}</td><td>${c.label}</td><td class="n">${asked}</td><td class="n">${r.mbps != null ? r2(r.mbps) : '-'}</td><td class="n">${r.encodeMs != null ? r2(r.encodeMs / 1000, 1) : '-'}</td><td class="n">${r.psnr != null ? r2(r.psnr) : '-'}</td><td class="n">${r.ssim != null ? r2(r.ssim, 4) : '-'}</td><td class="${r.error ? 'bad' : 'muted'}">${note}</td>`;
+  $('tbl').tBodies[0].appendChild(tr);
+}
+async function runAll() {
+  $('run').disabled = true; results.length = 0; $('tbl').tBodies[0].innerHTML = '';
+  $('status').textContent = 'Preparing the test video...'; await sleep(50);
+  let lock = null; try { lock = await navigator.wakeLock.request('screen'); } catch { /* no wake lock: the steps ask to keep the screen on */ }
+  if (!picture) buildAssets();
+  for (let n = 0; n < RUN.length; n++) {
+    const c = RUN[n];
+    const step = (m) => { $('status').textContent = `Running ${n + 1} of ${RUN.length} (${c.id}): ${m}`; };
+    step('start'); await sleep(50);
+    let r;
+    try { r = c.recorder ? await runRecorder(c, step) : (typeof VideoEncoder === 'undefined' ? { error: 'no VideoEncoder' } : await runEncoder(c, step)); }
+    catch (e) { r = { error: 'threw: ' + (e && e.message ? e.message : e) }; }
+    const out = { id: c.id, label: c.label };
+    for (const [k, v] of Object.entries(r)) out[k] = typeof v === 'number' ? r2(v, k === 'ssim' ? 4 : 2) : v;
+    results.push(out); row(c, out); $('out').value = block(); $('copy').disabled = false;
+    await sleep(300);
+  }
+  $('status').textContent = `Done: ${results.length} of ${RUN.length}. Tap Copy results.`;
+  $('run').disabled = false; window.__done = true;
+  try { lock && (await lock.release()); } catch {}
+}
+$('run').onclick = runAll;
+$('copy').onclick = async () => {
+  const t = $('out').value;
+  try { await navigator.clipboard.writeText(t); $('copy').textContent = 'Copied'; }
+  catch { $('out').focus(); $('out').select(); document.execCommand('copy'); $('copy').textContent = 'Copied (selected)'; }
+  setTimeout(() => ($('copy').textContent = 'Copy results'), 2500);
+};
+window.__runAll = runAll; window.__results = results; window.__block = block;
+// self-test of the score functions (known answers): identical -> 99 dB / 1.0; uniform +-5 error -> 10*log10(255^2/25) = 34.15 dB
+window.__selfTest = () => {
+  const a = new Float32Array(64 * 64).map((_, i) => (i * 37) % 256), b = a.map((v, i) => v + (i % 2 ? 5 : -5));
+  return { same: [psnr(a, a), ssim(a, a, 64, 64)], plus5: psnr(a, b), expectPlus5: 10 * Math.log10(255 * 255 / 25) };
+};
+</script>
+</body>
+</html>
