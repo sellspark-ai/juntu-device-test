@@ -1,1 +1,1 @@
-17f3e6d8e19b94f4aaaf38d87c3fed9cdb46d9fb1591466c81d4545ca64b9d81  juntu-debug.apk
+4b7b4f0b4e613a2f0ec9bf0190305587ff2a9244ae0077bcae22a963e35fc81e  juntu-debug.apk
